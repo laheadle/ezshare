@@ -1,0 +1,4 @@
+*.exe
+*.dll
+LJIT2WIN32/
+lua/
