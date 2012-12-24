@@ -4,3 +4,4 @@ LJIT2WIN32/
 lua/
 log.txt
 *.o
+*.a
