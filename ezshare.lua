@@ -2,26 +2,49 @@ local ffi = require("ffi")
 local C = ffi.C
 
 local ubc = ffi.load("udpbroadcast")
+require"sha1"
 
 ffi.cdef[[
 
+typedef void* tpeer;
 
- __declspec(dllexport) void* peer_create(int isServer);
+tpeer peer_create(int isServer);
 
- __declspec(dllexport) int peer_broadcast(void* peerIn, char* msg, unsigned int size);
+int peer_broadcast(tpeer peerIn, char* msg, unsigned int size);
 
- __declspec(dllexport) void peer_destroy(void* p);
+void peer_destroy(tpeer p);
 
 /* timeout is milliseconds */
- __declspec(dllexport) int peer_select(void* peerIn, int timeout);
+int peer_select(tpeer peerIn, int timeout);
 
- __declspec(dllexport) int peer_receive(void* peerIn, char* buf, int bufsize);
+int peer_receive(tpeer peerIn, char* buf, int bufsize);
 
 void exit( int exit_code ); 
 
 ]]
 
+--[[
+udpmaxlen=65507
+maxlen=1000 -- http://stackoverflow.com/questions/3292281/udp-sendto-and-recvfrom-max-buffer-size
+
+versionsize=4
+lengthsize=16
+idsize = 64
+opcodesize=8
+flagsize=64
+checksumsize=20
+]]
+
 local CLIENT, SERVER = 0, 1
+
+function exit(v)
+   ffi.C.exit(v)
+end
+
+function fail(msg)
+   print(msg.."\n")
+   exit(1)
+end
 
 function run()
    if arg[1] == "cli" then
@@ -34,7 +57,7 @@ function run()
       while true do
 	 n = ubc.peer_select(srv, 25)
 	 if n < 0 then
-	    print("bad select");
+	    fail("bad select")
 	 elseif n ~= 0 then
 	    len = 256
 	    buf = ffi.new("char[?]", len)

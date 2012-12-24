@@ -11,3 +11,8 @@ hi:
 udpbroadcast:
 	gcc -c udpbroadcast.c
 	gcc -shared -o udpbroadcast.dll udpbroadcast.o -Wl,--out-implib,libudpbroadcast.a -lws2_32
+
+gui:
+	gcc -o ezshare gui.c -mwindows 
+
+

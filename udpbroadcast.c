@@ -23,10 +23,12 @@
 #define PORT 2080
 #include "udpbroadcast.h"
 
-typedef struct peer {
+typedef struct speer {
   SOCKET socket;
   struct sockaddr_in addr;
-} peer;
+} speer;
+
+#define mkspeer(tpeer) ((speer *) tpeer)
 
 int initialized = 0;
 static void init(){
@@ -41,10 +43,10 @@ static void init(){
     }
 }
 
-void* peer_create(int isServer) 
+tpeer peer_create(int isServer) 
 {
   init();
-  peer *p = (peer*)malloc(sizeof(peer));
+  speer *p = (speer *)malloc(sizeof(speer));
   sockopt_t broadcast=1;
 
   if ((p->socket = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
@@ -76,21 +78,21 @@ void* peer_create(int isServer)
 }
 
 
-int peer_broadcast(void* peerIn, char* msg, unsigned int size)
+int peer_broadcast(tpeer peerIn, char* msg, unsigned int size)
 {
-  peer* p = (peer*) peerIn;
+  speer* p = mkspeer(peerIn);
   return sendto(p->socket, msg, size, 0, 
 		(struct sockaddr *)&p->addr, sizeof p->addr);
 }
 
-void peer_destroy(void* p)
+void peer_destroy(tpeer p)
 {
-  free((peer*)p);
+  free((speer*) p);
 }
 
 /* timneout is milliseconds */
-int peer_select(void* peerIn, int timeout) {
-  peer* p = (peer*) peerIn;
+int peer_select(tpeer peerIn, int timeout) {
+  speer* p = mkspeer(peerIn);
   int n;
   fd_set set;
   struct timeval timev = { 0, timeout*1000 };
@@ -100,9 +102,9 @@ int peer_select(void* peerIn, int timeout) {
   return select(p->socket+1, &set, NULL, NULL, &timev);
 }
 
-int peer_receive(void* peerIn, char* buf, int bufsize) 
+int peer_receive(tpeer peerIn, char* buf, int bufsize) 
 {
-  peer* p = (peer*) peerIn;
+  speer* p = mkspeer(peerIn);
   socklen_t addr_len = sizeof p->addr;
   return recvfrom(p->socket, buf, bufsize, 0, 
 		  (struct sockaddr *)&p->addr, &addr_len);
