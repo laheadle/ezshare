@@ -9,7 +9,7 @@ int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,i
 {
   lua_State* L = luaL_newstate();
   luaL_openlibs(L);
-  luaL_dostring(L, "require \"test_win\"");
+  luaL_dostring(L, "require \"ezshare\"");
   lua_getfield(L, LUA_GLOBALSINDEX, "run");
   lua_pushlightuserdata (L, hInstance);
   lua_pushinteger(L, nCmdShow);

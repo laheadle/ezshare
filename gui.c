@@ -9,8 +9,7 @@ void OpenDialog(HWND);
 
 char* appname = "Easy Share";
 
-int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, 
-    LPSTR lpCmdLine, int nCmdShow )
+void start(HINSTANCE hInstance, int nCmdShow)
 {
   MSG  msg ;    
   WNDCLASS wc = {0};
@@ -29,7 +28,6 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
   while( GetMessage(&msg, NULL, 0, 0)) {
     DispatchMessage(&msg);
   }
-  return (int) msg.wParam;
 }
 
 LRESULT CALLBACK WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
