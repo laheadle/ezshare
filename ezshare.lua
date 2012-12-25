@@ -82,15 +82,15 @@ function start_network()
    end
 end
 
-function run(hInstance, nCmdShow)
-   log(ubc)
-   ubc.on_file_selected(function(filename) print("selected"..filename) end)
+function _run(hInstance, nCmdShow)
+   ubc.on_file_selected(function(filename) log("selected"..ffi.string(filename)) end)
    ubc.start(hInstance, nCmdShow)
 end
 
+function run(hInstance, nCmdShow)
+   val, err = pcall(function() _run(hInstance, nCmdShow) end)
 
-val, err = pcall(run)
-
-if not val then
-   log(err)
+   if not val then
+      log(err)
+   end
 end
