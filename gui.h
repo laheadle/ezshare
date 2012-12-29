@@ -8,3 +8,4 @@ __declspec(dllexport) void start(HINSTANCE hInstance, int nCmdShow);
 __declspec(dllexport) int tick();
 
 __declspec(dllexport) void sleep(int n);
+

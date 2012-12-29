@@ -101,9 +101,7 @@ void OpenDialog(HWND hwnd)
   
   if(GetOpenFileName(&ofn))
     if (fsel != NULL) {
-      MessageBoxA(hwnd, "yo", "yo", 0);
       (*fsel)(ofn.lpstrFile);
-      MessageBoxA(hwnd, "yo2", "yo", 0);
     }
 }
 

@@ -43,6 +43,19 @@ static void init(){
     }
 }
 
+log_fun the_log_fun = NULL;
+
+void set_log_fun(log_fun fun)
+{
+  the_log_fun = fun;
+}
+
+void ulog(const char* msg) {
+  if (the_log_fun != NULL) {
+    (*the_log_fun)(msg);
+  }
+}
+
 tpeer peer_create(int isServer) 
 {
   init();
@@ -69,7 +82,9 @@ tpeer peer_create(int isServer)
     p->addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(p->socket, (struct sockaddr*)&p->addr, sizeof p->addr) == -1) {
       perror("bind");
-      printf("%d", WSAGetLastError());
+      char buf[32];
+      sprintf(buf, "bind %d", WSAGetLastError());
+      ulog(buf);
       exit(1);
     }
   }
@@ -81,8 +96,14 @@ tpeer peer_create(int isServer)
 int peer_broadcast(tpeer peerIn, char* msg, unsigned int size)
 {
   speer* p = mkspeer(peerIn);
-  return sendto(p->socket, msg, size, 0, 
-		(struct sockaddr *)&p->addr, sizeof p->addr);
+  int val = sendto(p->socket, msg, size, 0, 
+		   (struct sockaddr *)&p->addr, sizeof p->addr);
+  if (val == -1) {
+    char buf[32];
+    sprintf(buf, "broadcast %d", WSAGetLastError());
+    ulog(buf);
+  }
+  return val;
 }
 
 void peer_destroy(tpeer p)

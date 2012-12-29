@@ -29,12 +29,16 @@ int tick();
 
 void sleep(int n);
 
+typedef void (*log_fun)(char* filename);
+
+__declspec(dllexport) void set_log_fun(log_fun fun);
+
 ]]
 
 -- udp max packet length = 65507. we'll risk it, but see:
 -- http://stackoverflow.com/questions/3292281/udp-sendto-and-recvfrom-max-buffer-size
 
-packetlen=65500
+packetlen=512--65500
 
 -- header field sizes in bytes
 local versionsize = 1
@@ -42,9 +46,8 @@ local filenamelensize = 2
 local contentlensize = 4
 local fromsize = 4
 local seqsize = 4
-local reservedsize = 16
 
-local headerlen = versionsize + filenamelensize + contentlensize + fromsize + seqsize + reservedsize
+local headerlen = versionsize + filenamelensize + contentlensize + fromsize + seqsize
 local bodylen = packetlen - headerlen
 
 local logfile = io.open ("./log.txt", "r")
@@ -65,7 +68,6 @@ local waitLength = 25
 
 --[[
 
-versionsize=4
 lengthsize=16
 idsize = 64
 opcodesize=8
@@ -109,12 +111,13 @@ function nextPacketBuf()
    end
    -- spare the cpu with waitLength millisec timeout
    n = ubc.peer_select(server, waitLength)
+ 
    if n < 0 then
       fail("bad select")
    elseif n ~= 0 then
       log("packet")
       n = ubc.peer_receive(server, recvpacketbuf, packetlen)
-      return buf, n
+      return recvpacketbuf, n
    else
       return nil, 0
    end
@@ -143,7 +146,7 @@ function isDone(file)
 end
 
 function startFile(packet)
-   log("start")
+   log("start file")
    if files[packet.from] == nil then
       files[packet.from] = {}
    end
@@ -227,15 +230,15 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb,
 function fillSendPacketBuf(filename, seq, contentlen)
    log("fill")
    local ptr = 0
-   sendpacketbuf[ptr] = 1
+   sendpacketbuf[ptr] = ffi.cast('uint8_t', 1)
    ptr = ptr + versionsize
-   sendpacketbuf[ptr] = #filename
+   sendpacketbuf[ptr] = ffi.cast('uint16_t', #filename)
    ptr = ptr + filenamelensize
-   sendpacketbuf[ptr] = contentlen
+   sendpacketbuf[ptr] = ffi.cast('uint32_t', contentlen)
    ptr = ptr + contentlensize
-   sendpacketbuf[ptr] = self
+   sendpacketbuf[ptr] = ffi.cast('uint32_t', self)
    ptr = ptr + fromsize
-   sendpacketbuf[ptr] = seq
+   sendpacketbuf[ptr] = ffi.cast('uint32_t', seq)
    ptr = ptr + seqsize
    -- set file name
    ffi.copy(sendpacketbuf + ptr, filename, #filename)
@@ -250,23 +253,25 @@ function makeRecvPacket()
    end
    log("received")
    if len ~= packetlen then
-      error("packet len "..tostring(len))
+      log("packet len "..tostring(len))
    end
    packet = {}
-   local i = 0;
-   packet.version = ffi.string(buf[i], versionsize)
+   local i = 0
+   packet.version = buf[0]
+   log('v '..tostring(packet.version))
    i = i + versionsize
-   local filenamelen = ffi.string(buf[i], filenamelensize)
+   local filenamelen = ffi.cast('uint16_t', buf[i])
    i = i + filenamelensize
-   local contentlen = ffi.string(buf[i], contentlensize)
+   local contentlen = ffi.cast('uint16_t', buf[i])
    i = i + contentlensize
-   packet.from = ffi.string(buf[i], fromsize)
+   packet.from = ffi.cast('uint32_t', buf[i])
    i = i + fromsize
-   packet.seq = ffi.string(buf[i], seqsize)
+   packet.seq = ffi.cast('uint32_t', buf[i])
    i = i + seqsize
-   packet.filename = ffi.string(buf[i], filenamelen)
+   packet.filename = ffi.string(buf + i, filenamelen)
+   log(packet.filename)
    i = i + filenamelen
-   packet.content = ffi.string(buf[i], contentlen)
+   packet.content = ffi.string(buf + i, contentlen)
    return true, packet
 end
    
@@ -277,11 +282,12 @@ function sendFile(filename)
 
    f = C.fopen(filename, "rb")
    assert(f ~= nil)
-   local n = C.fread(sendfilebuf, 1, maxcontentlen, f)
+   local contentlen = C.fread(sendfilebuf, 1, maxcontentlen, f)
    local i = 0
-   while n > 0 do
-      ubc.peer_broadcast(client, fillSendPacketBuf(filename, i, n), n)
-      n = C.fread(sendfilebuf, 1, maxcontentlen, f)
+   while contentlen > 0 do
+      fillSendPacketBuf(filename, i, contentlen)
+      ubc.peer_broadcast(client, sendpacketbuf, headerlen + #filename + contentlen)
+      contentlen = C.fread(sendfilebuf, 1, maxcontentlen, f)
       i = i + 1
    end
 end
@@ -294,6 +300,9 @@ function _run(hInstance, nCmdShow)
       log("selected "..fn)
       sendFile(fn)
    end
+
+   ubc.set_log_fun(function(msg) log(ffi.string(msg)) end);
+
    ubc.on_file_selected(callback)
    ubc.start(hInstance, nCmdShow)
    while ubc.tick() ~= 0 do
