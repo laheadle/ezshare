@@ -11,7 +11,6 @@ char* appname = "Easy Share";
 
 void start(HINSTANCE hInstance, int nCmdShow)
 {
-  MSG  msg ;    
   WNDCLASS wc = {0};
   wc.lpszClassName = appname;
   wc.hInstance     = hInstance ;
@@ -23,11 +22,18 @@ void start(HINSTANCE hInstance, int nCmdShow)
   RegisterClass(&wc);
   CreateWindow( wc.lpszClassName, appname,
                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                150, 150, 265, 200, 0, 0, hInstance, 0);  
+                150, 150, 265, 200, 0, 0, hInstance, 0);
+}
 
-  while( GetMessage(&msg, NULL, 0, 0)) {
+int tick()
+{
+  MSG  msg;    
+  if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
     DispatchMessage(&msg);
+    if (msg.message == WM_QUIT)
+      return 0;
   }
+  return 1;
 }
 
 LRESULT CALLBACK WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
@@ -95,6 +101,13 @@ void OpenDialog(HWND hwnd)
   
   if(GetOpenFileName(&ofn))
     if (fsel != NULL) {
+      MessageBoxA(hwnd, "yo", "yo", 0);
       (*fsel)(ofn.lpstrFile);
+      MessageBoxA(hwnd, "yo2", "yo", 0);
     }
+}
+
+void sleep(int n)
+{
+  Sleep(n);
 }

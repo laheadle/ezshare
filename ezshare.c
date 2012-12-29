@@ -12,8 +12,9 @@ int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,i
   luaL_dostring(L, "require \"ezshare\"");
   lua_getfield(L, LUA_GLOBALSINDEX, "run");
   lua_pushlightuserdata (L, hInstance);
+  lua_pushlstring(L, lpCmdLine, strlen(lpCmdLine));
   lua_pushinteger(L, nCmdShow);
-  lua_call(L, 2, 1); 
+  lua_call(L, 3, 1); 
   return lua_tointeger(L, -1);
 }
 
