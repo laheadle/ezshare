@@ -123,12 +123,14 @@ function nextPacketBuf()
    end
 end
 
-function isKnownFile(packet)
+function isKnownFile(packet) 
+   --[[
    log("known?")
    log(files[packet.from])
    if files[packet.from] ~= nil then
       log(files[packet.from][packet.filename])
-   end
+   end 
+   ]]
    return files[packet.from] ~= nil and 
       files[packet.from][packet.filename] ~= nil
 end
@@ -139,7 +141,20 @@ end
 
 function isWrongSeq(packet)
    local file = getFile(packet)
-   return file and file[nextSeq] ~= packet.seq
+   --[[
+   if file then
+      log("wrong?")
+      for a,b in pairs(file) do
+	 log(a)
+	 log(b)
+      end
+      log(file)
+      log(file.nextSeq)
+      log(packet.seq)
+      log(file.nextSeq ~= packet.seq)
+   end
+   ]]
+   return file and file.nextSeq ~= packet.seq
 end
 
 function isNewFile(packet)
@@ -154,20 +169,23 @@ function writeChunk(filew, content)
    assert(C.fwrite(content, 1, #content, filew) == #content)
 end
 
+function finish(packet)
+   assert(isKnownFile(packet) and isLast(packet))
+   local file = getFile(packet)
+   files[packet.from][packet.filename] = nil
+   return true, file
+end
+
 function continueFile(packet)
    log("continue")
    local file = getFile(packet)
-   if isDone(file) then
-      error("bad continue")
-   end
-   assert(file[nextSeq] == packet.seq)
-   writeChunk(file.filew, packet.content)
-   file.nextSeq = file.nextSeq + 1
-   if isDone(file) then
+   if isLast(packet) then
       log("done")
-      return true, file
+      return finish(packet)
    else
-      return false
+      assert(file.nextSeq == packet.seq)
+      writeChunk(file.filew, packet.content)
+      file.nextSeq = file.nextSeq + 1
    end
 end
 
@@ -176,6 +194,7 @@ function startFile(packet)
    if files[packet.from] == nil then
       files[packet.from] = {}
    end
+   assert(packet.seq == 0)
    assert(files[packet.from][packet.filename] == nil)
    file = { 
       filename=packet.filename,
@@ -186,7 +205,7 @@ function startFile(packet)
    writeChunk(file.filew, packet.content)
    if isLast(packet) then
       log("done (small)")
-      return true, file
+      return finish(packet)
    else
       log("started")
       return false
@@ -276,6 +295,8 @@ function makeRecvPacket()
    log(packet.filename)
    i = i + filenamelen
    packet.content = ffi.string(buf + i, contentlen)
+   -- sanity checks
+   assert(packet.version == 1)
    return true, packet
 end
    
