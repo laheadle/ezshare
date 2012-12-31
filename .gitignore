@@ -5,3 +5,7 @@ lua/
 log.txt
 *.o
 *.a
+a.txt
+afile.txt
+afile.txtz
+log2.txt

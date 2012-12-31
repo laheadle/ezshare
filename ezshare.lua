@@ -124,6 +124,11 @@ function nextPacketBuf()
 end
 
 function isKnownFile(packet)
+   log("known?")
+   log(files[packet.from])
+   if files[packet.from] ~= nil then
+      log(files[packet.from][packet.filename])
+   end
    return files[packet.from] ~= nil and 
       files[packet.from][packet.filename] ~= nil
 end
@@ -141,35 +146,12 @@ function isNewFile(packet)
    return not isKnownFile(packet)
 end
 
-function isDone(file)
-   return file.numPackets == file.nextSeq
+function isLast(packet)
+   return #packet.content == 0
 end
 
-function startFile(packet)
-   log("start file")
-   if files[packet.from] == nil then
-      files[packet.from] = {}
-   end
-   packets={}
-   packets[0]=packet
-   file = { 
-      numPackets=packet.numPackets,
-      fileSize=packet.fileSize,
-      packets=packets,
-      nextSeq=1
-   }
-   files[packet.from][packet.filename] = file
-   if isDone(file) then
-      log("done")
-      file.packets=nil -- reclaim
-      return true, file
-   else
-      return false
-   end
-end
-
-function writeChunk(filename, content)
-   assert(C.fwrite(content, 1, n, files[filename].file) == n)
+function writeChunk(filew, content)
+   assert(C.fwrite(content, 1, #content, filew) == #content)
 end
 
 function continueFile(packet)
@@ -179,13 +161,34 @@ function continueFile(packet)
       error("bad continue")
    end
    assert(file[nextSeq] == packet.seq)
-   file.packets[packet.seq] = packet
-   writeChunk(file.filename, packet.content)
+   writeChunk(file.filew, packet.content)
    file.nextSeq = file.nextSeq + 1
-   if isDone(packet) then
+   if isDone(file) then
       log("done")
       return true, file
    else
+      return false
+   end
+end
+
+function startFile(packet)
+   log("start file from " ..tostring(packet.from))
+   if files[packet.from] == nil then
+      files[packet.from] = {}
+   end
+   assert(files[packet.from][packet.filename] == nil)
+   file = { 
+      filename=packet.filename,
+      nextSeq=1,
+      filew=C.fopen(packet.filename.."z", "wb")
+   }
+   files[packet.from][packet.filename] = file
+   writeChunk(file.filew, packet.content)
+   if isLast(packet) then
+      log("done (small)")
+      return true, file
+   else
+      log("started")
       return false
    end
 end
@@ -228,7 +231,6 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb,
 
 -- header=version,filenamelen,contentlen,from,seq; body=filename,content
 function fillSendPacketBuf(filename, seq, contentlen)
-   log("fill")
    local ptr = 0
    sendpacketbuf[ptr] = ffi.cast('uint8_t', 1)
    ptr = ptr + versionsize
@@ -260,13 +262,15 @@ function makeRecvPacket()
    packet.version = buf[0]
    log('v '..tostring(packet.version))
    i = i + versionsize
-   local filenamelen = ffi.cast('uint16_t', buf[i])
+   local filenamelen = ffi.new('uint16_t[?]', 1, buf[i])[0]
    i = i + filenamelensize
-   local contentlen = ffi.cast('uint16_t', buf[i])
+   local contentlen = ffi.new('uint16_t[?]', 1, buf[i])[0]
    i = i + contentlensize
-   packet.from = ffi.cast('uint32_t', buf[i])
+   packet.from = ffi.new('uint32_t[?]', 1, buf[i])[0]
+   log(packet.from)
    i = i + fromsize
-   packet.seq = ffi.cast('uint32_t', buf[i])
+   packet.seq = ffi.new('uint32_t[?]', 1, buf[i])[0]
+   log(packet.seq)
    i = i + seqsize
    packet.filename = ffi.string(buf + i, filenamelen)
    log(packet.filename)
@@ -290,6 +294,9 @@ function sendFile(filename)
       contentlen = C.fread(sendfilebuf, 1, maxcontentlen, f)
       i = i + 1
    end
+   -- done, send empty packet
+   fillSendPacketBuf(filename, i, 0)
+   ubc.peer_broadcast(client, sendpacketbuf, headerlen + #filename + 0)
 end
 
 function _run(hInstance, nCmdShow)
@@ -305,7 +312,17 @@ function _run(hInstance, nCmdShow)
 
    ubc.on_file_selected(callback)
    ubc.start(hInstance, nCmdShow)
-   while ubc.tick() ~= 0 do
+   while ubc.tick() ~= 0 do --[[
+      log('tick with files:')
+      local lastwho = 0
+      for who,val in pairs(files) do
+	 log(who)
+	 assert(lastwho == 0 or lastwho == who)
+	 for filename, packet in pairs(val) do
+	    log(filename)
+	 end
+	 lastwho = who
+      end ]]
       finished, file = tickNetwork()
       if finished then
 	 log('finished', file)
