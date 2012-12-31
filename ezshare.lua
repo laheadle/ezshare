@@ -38,7 +38,7 @@ __declspec(dllexport) void set_log_fun(log_fun fun);
 -- udp max packet length = 65507. we'll risk it, but see:
 -- http://stackoverflow.com/questions/3292281/udp-sendto-and-recvfrom-max-buffer-size
 
-packetlen=512--65500
+maxpacketlen=512--65500
 
 -- header field sizes in bytes
 local versionsize = 1
@@ -48,7 +48,7 @@ local fromsize = 4
 local seqsize = 4
 
 local headerlen = versionsize + filenamelensize + contentlensize + fromsize + seqsize
-local bodylen = packetlen - headerlen
+local bodylen = maxpacketlen - headerlen
 
 local logfile = io.open ("./log.txt", "r")
 
@@ -60,9 +60,9 @@ end
 
 maxint = 3000000000
 
-local sendpacketbuf = ffi.new('char[?]', packetlen)
+local sendpacketbuf = ffi.new('uint8_t[?]', maxpacketlen)
 
-local recvpacketbuf = ffi.new('char[?]', packetlen)
+local recvpacketbuf = ffi.new('uint8_t[?]', maxpacketlen)
 
 local waitLength = 25
 
@@ -100,8 +100,9 @@ function startNetwork()
    if not cliOnly then
       server = ubc.peer_create(SERVER)
    end
+   math.randomseed(os.time()) -- boo
    self = math.random(maxint)
-   log('net is up')
+   log('net is up '..tostring(self))
 end
 
 function nextPacketBuf()
@@ -116,7 +117,7 @@ function nextPacketBuf()
       fail("bad select")
    elseif n ~= 0 then
       log("packet")
-      n = ubc.peer_receive(server, recvpacketbuf, packetlen)
+      n = ubc.peer_receive(server, recvpacketbuf, maxpacketlen)
       return recvpacketbuf, n
    else
       return nil, 0
@@ -248,21 +249,35 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb,
 
 ]]
 
+
+function putb(buf, type, where, what)
+   local bp = ffi.cast('uint8_t*', buf)
+   local ptr = ffi.cast(type..'*', bp + where)
+   ptr[0] = what
+end
+
+function getb(buf, type, where)
+   local bp = ffi.cast('uint8_t*', buf)
+   return ffi.cast(type..'*', bp + where)[0]
+end
+
 -- header=version,filenamelen,contentlen,from,seq; body=filename,content
 function fillSendPacketBuf(filename, seq, contentlen)
-   local ptr = 0
-   sendpacketbuf[ptr] = ffi.cast('uint8_t', 1)
-   ptr = ptr + versionsize
-   sendpacketbuf[ptr] = ffi.cast('uint16_t', #filename)
-   ptr = ptr + filenamelensize
-   sendpacketbuf[ptr] = ffi.cast('uint32_t', contentlen)
-   ptr = ptr + contentlensize
-   sendpacketbuf[ptr] = ffi.cast('uint32_t', self)
-   ptr = ptr + fromsize
-   sendpacketbuf[ptr] = ffi.cast('uint32_t', seq)
-   ptr = ptr + seqsize
+   assert(contentlen <= maxpacketlen - headerlen - 1)
+   local b = sendpacketbuf
+   local where = 0
+   putb(b, 'uint8_t', where, 1)
+   where = where + versionsize
+   putb(b, 'uint16_t', where, #filename)
+   where = where + filenamelensize
+   putb(b, 'uint32_t', where, contentlen)
+   where = where + contentlensize
+   putb(b, 'uint32_t', where, self)
+   where = where + fromsize
+   putb(b, 'uint32_t', where, seq)
+   where = where + seqsize
    -- set file name
-   ffi.copy(sendpacketbuf + ptr, filename, #filename)
+   ffi.copy(sendpacketbuf + where, filename, #filename)
    -- content already set
 end
 
@@ -273,30 +288,36 @@ function makeRecvPacket()
       return false
    end
    log("received")
-   if len ~= packetlen then
+   if len ~= maxpacketlen then
       log("packet len "..tostring(len))
    end
    packet = {}
    local i = 0
-   packet.version = buf[0]
+   packet.version = getb(buf, 'uint8_t', i)
    log('v '..tostring(packet.version))
+   assert(packet.version == 1)
    i = i + versionsize
-   local filenamelen = ffi.new('uint16_t[?]', 1, buf[i])[0]
+   local filenamelen = getb(buf, 'uint16_t', i)
    i = i + filenamelensize
-   local contentlen = ffi.new('uint16_t[?]', 1, buf[i])[0]
+   log(filenamelen)
+   local contentlen = getb(buf, 'uint32_t', i) --ffi.new('uint32_t[?]', 1, buf[i])[0]
+   log(contentlen)
+   assert(contentlen + headerlen + filenamelen <= maxpacketlen)
    i = i + contentlensize
-   packet.from = ffi.new('uint32_t[?]', 1, buf[i])[0]
+   packet.from = getb(buf, 'uint32_t', i) -- ffi.new('uint32_t[?]', 1, buf[i])[0]
    log(packet.from)
    i = i + fromsize
-   packet.seq = ffi.new('uint32_t[?]', 1, buf[i])[0]
+   packet.seq = getb(buf, 'uint32_t', i) -- ffi.new('uint32_t[?]', 1, buf[i])[0]
    log(packet.seq)
    i = i + seqsize
    packet.filename = ffi.string(buf + i, filenamelen)
    log(packet.filename)
    i = i + filenamelen
    packet.content = ffi.string(buf + i, contentlen)
+   log(#packet.content)
    -- sanity checks
    assert(packet.version == 1)
+   assert(#packet.content <= maxpacketlen - headerlen - 1)
    return true, packet
 end
    
@@ -311,6 +332,7 @@ function sendFile(filename)
    local i = 0
    while contentlen > 0 do
       fillSendPacketBuf(filename, i, contentlen)
+      log(headerlen + #filename + contentlen)
       ubc.peer_broadcast(client, sendpacketbuf, headerlen + #filename + contentlen)
       contentlen = C.fread(sendfilebuf, 1, maxcontentlen, f)
       i = i + 1
