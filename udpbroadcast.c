@@ -56,7 +56,7 @@ void ulog(const char* msg) {
   }
 }
 
-tpeer peer_create(int isServer) 
+tpeer peer_create(int isServer)
 {
   init();
   speer *p = (speer *)malloc(sizeof(speer));
@@ -67,7 +67,7 @@ tpeer peer_create(int isServer)
     exit(1);
   }
   if ((setsockopt(p->socket, SOL_SOCKET, SO_BROADCAST,
-		  &broadcast, sizeof broadcast)) == -1) {
+                  &broadcast, sizeof broadcast)) == -1) {
     perror("setsockopt - SO_SOCKET ");
     exit(1);
   }
@@ -80,7 +80,8 @@ tpeer peer_create(int isServer)
 
   if (isServer) {
     p->addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(p->socket, (struct sockaddr*)&p->addr, sizeof p->addr) == -1) {
+    if (bind(p->socket, (struct sockaddr*)&p->addr,
+             sizeof p->addr) == -1) {
       perror("bind");
       char buf[32];
       sprintf(buf, "bind %d", WSAGetLastError());
@@ -97,7 +98,7 @@ int peer_broadcast(tpeer peerIn, char* msg, unsigned int size)
 {
   speer* p = mkspeer(peerIn);
   int val = sendto(p->socket, msg, size, 0, 
-		   (struct sockaddr *)&p->addr, sizeof p->addr);
+                   (struct sockaddr *)&p->addr, sizeof p->addr);
   if (val == -1) {
     char buf[32];
     sprintf(buf, "broadcast %d", WSAGetLastError());
@@ -128,5 +129,5 @@ int peer_receive(tpeer peerIn, char* buf, int bufsize)
   speer* p = mkspeer(peerIn);
   socklen_t addr_len = sizeof p->addr;
   return recvfrom(p->socket, buf, bufsize, 0, 
-		  (struct sockaddr *)&p->addr, &addr_len);
+                  (struct sockaddr *)&p->addr, &addr_len);
 }
