@@ -1,0 +1,3 @@
+
+- shared mem
+http://comsci.liu.edu/~murali/win32/SharedMemory.htm
