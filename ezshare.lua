@@ -2,7 +2,8 @@ local ffi = require("ffi")
 local C = ffi.C
 
 local ubc = ffi.load("ezshare")
-require"sha1"
+
+-- C functions implementing network, GUI, and OS-specific functionality.
 
 ffi.cdef[[
 
@@ -35,20 +36,47 @@ __declspec(dllexport) void set_log_fun(log_fun fun);
 
 ]]
 
--- udp max packet length = 65507. we'll risk it, but see:
+-------------- Networking Data Structures
+
+-- Maximum packet size Note: UDP max packet length is 65507. People
+-- don't usually go this big because of concerns about packet loss,
+-- but we'll risk it. See:
 -- http://stackoverflow.com/questions/3292281/udp-sendto-and-recvfrom-max-buffer-size
 
-maxpacketlen=512--65500
+local maxpacketlen=65500
 
--- header field sizes in bytes
+-- One buffer for receiving and one for sending.
+local recvpacketbuf = ffi.new('uint8_t[?]', maxpacketlen)
+local sendpacketbuf = ffi.new('uint8_t[?]', maxpacketlen)
+
+
+-- Packet Header Fields (field sizes are in bytes)
+
+-- protocol version
 local versionsize = 1
+-- The length of the filename string which begins right after this header.
 local filenamelensize = 2
+-- The length of the chunk of file content this packet contains.  The
+-- file content begins right after the filename.
 local contentlensize = 4
+-- The id of the peer who sent this packet (random int generated at startup).
 local fromsize = 4
+-- The sequence number. Identifies which chunk of the file this packet contains;
+-- starts at 0.
 local seqsize = 4
 
-local headerlen = versionsize + filenamelensize + contentlensize + fromsize + seqsize
+-- Length in bytes of all the packet header fields.
+local headerlen =
+   versionsize +
+   filenamelensize +
+   contentlensize +
+   fromsize +
+   seqsize
+
+-- The packet body contains the file name and then the file content.
 local bodylen = maxpacketlen - headerlen
+
+------ Logging
 
 local logfile = io.open ("./log.txt", "r")
 
@@ -58,63 +86,40 @@ else
    logfile = io.open ("./log.txt", "w")
 end
 
-maxint = 3000000000
-
-local sendpacketbuf = ffi.new('uint8_t[?]', maxpacketlen)
-
-local recvpacketbuf = ffi.new('uint8_t[?]', maxpacketlen)
-
-local waitLength = 25
-
---[[
-
-lengthsize=16
-idsize = 64
-opcodesize=8
-flagsize=64
-checksumsize=20
-]]
-
 local client, server, self = nil, nil, nil
 local CLIENT, SERVER = 0, 1
-local cliOnly = false
+
+-- Used for testing two instances on the same machine. If true,
+-- prevents the instance from listening on a port.
+local clientOnly = false
 
 local files = {}
-
-function exit(v)
-   ffi.C.exit(v)
-end
 
 function log(msg, lvl)
    logfile:write(tostring(msg).."\n")
    logfile:flush()
 end
 
-function fail(msg)
-   log(tostring(msg).."\n")
-   exit(1)
-end
-
 function startNetwork()
    client = ubc.peer_create(CLIENT)
-   if not cliOnly then
+   if not clientOnly then
       server = ubc.peer_create(SERVER)
    end
    math.randomseed(os.time()) -- boo
-   self = math.random(maxint)
+   self = math.random(3000000000)
    log('net is up '..tostring(self))
 end
 
 function nextPacketBuf()
-   if cliOnly then
-      ubc.sleep(waitLength)
+   if clientOnly then
+      ubc.sleep(25)
       return nil, 0
    end
    -- spare the cpu with waitLength millisec timeout
    n = ubc.peer_select(server, waitLength)
- 
+
    if n < 0 then
-      fail("bad select")
+      log("bad select")
    elseif n ~= 0 then
       log("packet")
       n = ubc.peer_receive(server, recvpacketbuf, maxpacketlen)
@@ -124,15 +129,8 @@ function nextPacketBuf()
    end
 end
 
-function isKnownFile(packet) 
-   --[[
-   log("known?")
-   log(files[packet.from])
-   if files[packet.from] ~= nil then
-      log(files[packet.from][packet.filename])
-   end 
-   ]]
-   return files[packet.from] ~= nil and 
+function isKnownFile(packet)
+   return files[packet.from] ~= nil and
       files[packet.from][packet.filename] ~= nil
 end
 
@@ -142,19 +140,6 @@ end
 
 function isWrongSeq(packet)
    local file = getFile(packet)
-   --[[
-   if file then
-      log("wrong?")
-      for a,b in pairs(file) do
-	 log(a)
-	 log(b)
-      end
-      log(file)
-      log(file.nextSeq)
-      log(packet.seq)
-      log(file.nextSeq ~= packet.seq)
-   end
-   ]]
    return file and file.nextSeq ~= packet.seq
 end
 
@@ -197,7 +182,7 @@ function startFile(packet)
    end
    assert(packet.seq == 0)
    assert(files[packet.from][packet.filename] == nil)
-   file = { 
+   file = {
       filename=packet.filename,
       nextSeq=1,
       filew=C.fopen(packet.filename.."z", "wb")
@@ -221,20 +206,18 @@ function tickNetwork()
    local has, packet = makeRecvPacket()
    if has and packet.from ~= self then
       if isWrongSeq(packet) then
-	 reset(packet)
-	 return false
+         reset(packet)
+         return false
       elseif isNewFile(packet) then
-	 return startFile(packet)
+         return startFile(packet)
       elseif has then
-	 return continueFile(packet)
+         return continueFile(packet)
       end
    end
    -- drop self packets
 end
 
 ffi.cdef[[
-
-void exit( int exit_code ); 
 
 void *fopen(const char *path, const char *mode);
 
@@ -300,11 +283,11 @@ function makeRecvPacket()
    local filenamelen = getb(buf, 'uint16_t', i)
    i = i + filenamelensize
    log(filenamelen)
-   local contentlen = getb(buf, 'uint32_t', i) --ffi.new('uint32_t[?]', 1, buf[i])[0]
+   local contentlen = getb(buf, 'uint32_t', i)
    log(contentlen)
    assert(contentlen + headerlen + filenamelen <= maxpacketlen)
    i = i + contentlensize
-   packet.from = getb(buf, 'uint32_t', i) -- ffi.new('uint32_t[?]', 1, buf[i])[0]
+   packet.from = getb(buf, 'uint32_t', i)
    log(packet.from)
    i = i + fromsize
    packet.seq = getb(buf, 'uint32_t', i) -- ffi.new('uint32_t[?]', 1, buf[i])[0]
@@ -320,7 +303,8 @@ function makeRecvPacket()
    assert(#packet.content <= maxpacketlen - headerlen - 1)
    return true, packet
 end
-   
+
+
 function sendFile(filename)
    local maxcontentlen = bodylen - #filename
    assert(maxcontentlen > 0)
@@ -333,7 +317,8 @@ function sendFile(filename)
    while contentlen > 0 do
       fillSendPacketBuf(filename, i, contentlen)
       log(headerlen + #filename + contentlen)
-      ubc.peer_broadcast(client, sendpacketbuf, headerlen + #filename + contentlen)
+      ubc.peer_broadcast(client, sendpacketbuf,
+                         headerlen + #filename + contentlen)
       contentlen = C.fread(sendfilebuf, 1, maxcontentlen, f)
       i = i + 1
    end
@@ -345,7 +330,7 @@ end
 function _run(hInstance, nCmdShow)
    jit.off(true, true) -- for debugging
    startNetwork()
-   local callback = function(filename) 
+   local callback = function(filename)
       local fn = ffi.string(filename)
       log("selected "..fn)
       sendFile(fn)
@@ -355,20 +340,10 @@ function _run(hInstance, nCmdShow)
 
    ubc.on_file_selected(callback)
    ubc.start(hInstance, nCmdShow)
-   while ubc.tick() ~= 0 do --[[
-      log('tick with files:')
-      local lastwho = 0
-      for who,val in pairs(files) do
-	 log(who)
-	 assert(lastwho == 0 or lastwho == who)
-	 for filename, packet in pairs(val) do
-	    log(filename)
-	 end
-	 lastwho = who
-      end ]]
+   while ubc.tick() ~= 0 do
       finished, file = tickNetwork()
       if finished then
-	 log('finished', file)
+         log('finished', file)
       end
    end
 end
@@ -377,7 +352,7 @@ function run(hInstance, cmdline, nCmdShow)
    log('run')
    if cmdline == 'cli' then
       log("client")
-      cliOnly = true
+      clientOnly = true
    else
       log("server")
    end
